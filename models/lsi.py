@@ -51,6 +51,9 @@ class InformationRetrievalModel:
         self.documents = []
         self.queries = {}
         
+        self.tfidf_matrix = None
+        self.lsi_matrix = None
+        
         self.vectorizer = TfidfVectorizer(
             min_df=2, max_df=0.85, 
             tokenizer=self._preprocess_text, token_pattern=None, 
@@ -59,9 +62,7 @@ class InformationRetrievalModel:
             smooth_idf=True
         )
         self.svd = TruncatedSVD(n_components=100, n_iter=10, random_state=42)
-        
-        self.tfidf_matrix = None
-        self.lsi_matrix = None
+        self.normalizer = Normalizer()
         
     def _preprocess_text(self, text: str) -> List[str]:
         """
@@ -82,6 +83,39 @@ class InformationRetrievalModel:
         tokens = [stemmer.stem(token) for token in tokens]
 
         return tokens
+            
+    def _pseudo_feedback_rocchio(
+        self,
+        query_vector: np.ndarray,
+        relevant_vectors: np.ndarray,
+        non_relevant_vectors: np.ndarray,
+        alpha: float = 1.0,
+        beta: float = 0.75,
+        gamma: float = 0.15
+    ) -> np.ndarray:
+        """
+        Aplica el algoritmo de Rocchio con documentos relevantes y no relevantes.
+
+        Args:
+            query_vector (np.ndarray): Vector original de la consulta.
+            relevant_vectors (np.ndarray): Matriz de documentos relevantes (top-K).
+            non_relevant_vectors (np.ndarray): Matriz de documentos no relevantes (bottom-K).
+            alpha (float): Peso de la consulta original.
+            beta (float): Peso de los documentos relevantes.
+            gamma (float): Peso de los documentos no relevantes.
+
+        Returns:
+            np.ndarray: Vector modificado de la consulta.
+        """
+        modified_query = alpha * query_vector
+
+        if relevant_vectors.shape[0] > 0:
+            modified_query += (beta / relevant_vectors.shape[0]) * np.sum(relevant_vectors, axis=0)
+
+        if non_relevant_vectors.shape[0] > 0:
+            modified_query -= (gamma / non_relevant_vectors.shape[0]) * np.sum(non_relevant_vectors, axis=0)
+
+        return modified_query
         
     def fit(self, dataset_name: str):
         """
@@ -103,15 +137,18 @@ class InformationRetrievalModel:
             self.doc_ids.append(doc.doc_id)
             self.documents.append(doc.text.strip())
             
+        self.queries = {q.query_id: q.text.strip() for q in self.dataset.queries_iter()}
+            
+        # Vectorizar los documentos usando TF-IDF
         self.tfidf_matrix = self.vectorizer.fit_transform(self.documents)
         
+        # Aplicar SVD para LSI
         self.lsi_matrix = self.svd.fit_transform(self.tfidf_matrix)
-        self.normalizer = Normalizer()
-        self.lsi_matrix = self.normalizer.fit_transform(self.lsi_matrix)
         
-        self.queries = {q.query_id: q.text.strip() for q in self.dataset.queries_iter()}
+        # Normalizar la matriz LSI
+        self.lsi_matrix = self.normalizer.fit_transform(self.lsi_matrix)
 
-    def predict(self, top_k: int, threshold: float = 0.5) -> Dict[str, Dict[str, List[str]]]:
+    def predict(self, top_k: int, threshold: float = 0.6, feedback = True, feedback_k = 5) -> Dict[str, Dict[str, List[str]]]:
         """
         Realiza búsquedas para TODAS las queries del dataset automáticamente.
         
@@ -135,10 +172,29 @@ class InformationRetrievalModel:
             query_lsi = self.svd.transform(query_tfidf)
             query_lsi = self.normalizer.transform(query_lsi)
             
+            # Hallar similitudes coseno entre la query y los documentos LSI
             cosine_similarities = cosine_similarity(query_lsi, self.lsi_matrix).flatten()
             
             # Obtener los índices ordenados
             sorted_indices = np.argsort(cosine_similarities)[::-1]
+            
+            # Pseudo-feedback (Rocchio)
+            if feedback:
+                top_relevant_indices = sorted_indices[:feedback_k]
+                bottom_non_relevant_indices = sorted_indices[-feedback_k:]
+
+                relevant_vectors = self.lsi_matrix[top_relevant_indices]
+                non_relevant_vectors = self.lsi_matrix[bottom_non_relevant_indices]
+
+                query_lsi = self._pseudo_feedback_rocchio(
+                    query_vector=query_lsi,
+                    relevant_vectors=relevant_vectors,
+                    non_relevant_vectors=non_relevant_vectors
+                )
+
+                query_lsi = self.normalizer.transform(query_lsi)
+                cosine_similarities = cosine_similarity(query_lsi, self.lsi_matrix).flatten()
+                sorted_indices = np.argsort(cosine_similarities)[::-1]
             
             # Filtrar por threshold y top_k
             results = []
@@ -149,7 +205,7 @@ class InformationRetrievalModel:
                 score = cosine_similarities[idx]
                 
                 if score < threshold:
-                    continue
+                    break
                 
                 results.append((self.doc_ids[idx], float(score)))
 
