@@ -1,4 +1,3 @@
-
 NAME = "Ernesto Abreu Peraza"
 GROUP = "312"
 CAREER = "Ciencia de la Computación"
@@ -6,27 +5,32 @@ MODEL = "Modelo de Semántica Latente (LSI)"
 
 """
 INFORMACIÓN EXTRA:
+Se usa TF-IDF para ponderar los vectores de los documentos y las consultas.
 
 Fuente bibliográfica:
-...
+Manning, C. D., Raghavan, P., & Schütze, H. (2008). Introduction to Information Retrieval. Cambridge University Press.
 
 Mejora implementada:
-...
+Se implementó un preprocesamiento a los documentos y las consultas, con el objetivo de eliminar las stopwords y lematizar los tokens.
+Se implementó pseudo-retroalimentación usando el algoritmo Rocchio visto en conferencia.
 
 Definición del modelo:
-Q: ... 
-D: ...
-F: ...
-R: ...
+Q: Vector de pesos no negativos asociado a los términos de la consulta proyectado en el espacio LSI.
+D: Vectores de pesos no negativos asociados a los términos del documento proyectados en el espacio LSI.
+F: Espacio de características reducido mediante SVD (LSI) y operaciones entre vectores y matrices del Algebra Lineal.
+R: Similitud de coseno entre el vector de la consulta y los documentos en el espacio LSI. 
 
 ¿Dependencia entre los términos?
-...
+Sí.
+LSI capta dependencias semánticas entre términos al reducir la dimensionalidad y combinar correlaciones entre palabras y documentos.
 
 Correspondencia parcial documento-consulta:
-...
+Sí.
+LSI permite encontrar documentos que no necesariamente contienen los mismos términos que la consulta.
 
 Ranking:
-...
+Sí.
+Los documentos son ordenados en función de su similitud de coseno con respecto al vector de consulta proyectado en el espacio LSI.
 
 """
 
